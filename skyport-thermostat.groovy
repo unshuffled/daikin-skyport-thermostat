@@ -140,9 +140,6 @@ void clearCredentals() {
 def updated(){
     logDebug "updated()"
     
-    // Always clear any stored tokens
-    device.removeSetting("useFahrenheit")  // TODO: remove after one cycle
-
     if(debugEnabled) {
         runIn(1800,"logsOff")
     } else {
