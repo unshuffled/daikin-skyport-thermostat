@@ -33,7 +33,7 @@ import groovy.transform.Field
 @SuppressWarnings('unused')
 static String version() {return "1.0.0"}
 
-@Field serverPath = "https://integrator-api.daikinskyport.com"
+@Field static final serverPath = "https://integrator-api.daikinskyport.com"
 
 @Field static Map operatingModes = [
 "0":"off",
