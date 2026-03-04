@@ -1,8 +1,15 @@
-* Daikin One+ Single Thermostat 
- * https://www.daikinone.com/openapi/documentation/index.html
- * 
- * Modified for multi-device support
+/* 
+ * Daikin SkyPort Thermostat Driver
  *
+ * Supports:
+ * - Daikin One+, One Touch
+ * - Amana Smart Thermostat
+ * - Goodman GTST? (untested)
+ * 
+ * https://www.daikinone.com/openapi/documentation/index.html
+ * https://github.com/apetrycki/daikinskyport/blob/master/API_info.md
+ * https://github.com/TJCoffey/DaikinSkyportToMQTT/blob/main/ThermostatParameters.md
+ * 
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
  *
@@ -12,25 +19,17 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Change History:
- *
- *    Date         Who           What
- *    ----         ---           ----
- *    2026-02-13   Trevor Deane Multi-device support, async HTTP, proper initialization
- * used Claude Code for code generation
-*/
+ *  Forked from: Trevor Deane's Daikin OnePlus Thermostat driver (version 0.2.0)
+ */
 import java.text.SimpleDateFormat
 import groovy.json.JsonSlurper
 import groovy.json.JsonOutput
 import groovy.transform.Field
 
 @SuppressWarnings('unused')
-static String version() {return "0.2.0"}
+static String version() {return "1.0.0"}
 
 @Field serverPath = "https://integrator-api.daikinskyport.com"
-@Field daiApiKey = "PLACE APU KEY HERE"
-@Field email = "PLACE EMAIL ADDRESS HERE"
-@Field integratorToken = "PLACE VERY LONG TOKEN HERE"
 
 @Field static Map operatingModes = [
 "0":"off",
@@ -53,10 +52,10 @@ static String version() {return "0.2.0"}
 
 metadata {
     definition (
-        name: "Daikin OnePlus Thermostat", 
-        namespace: "SeriesOfUnlikelyExplanations", 
-        author: "Tom Woodard",
-        importUrl:"https://gist.github.com/SeriesOfUnlikelyExplanations/50561c32a92364d220aa895e44dbbbb3"
+        name: "Daikin SkyPort Thermostat", 
+        namespace: "pw.lido", 
+        author: "Jon-Erik Lido",
+        importUrl: ""
     ) {
         capability "Actuator"
         capability "Configuration"
@@ -92,6 +91,7 @@ metadata {
         command "disableSchedule"
         command "setThermostatMode", [[name: "Thermostat mode*",type:"ENUM", description:"Thermostat mode", constraints: operatingModes.collect {k,v -> v}]]
         command "setThermostatFanMode", [[name: "Fan mode*",type:"ENUM", description:"Fan mode", constraints: fanModes.collect {k,v -> v}]]
+        command "saveCredentials", [[name:"apiKey", type:"STRING"], [name:"email", type:"STRING"], [name:"integratorToken", type:"STRING"]]
     }   
 }
 
@@ -183,11 +183,11 @@ void getAuthTokenAsync() {
         timeout: 30,
         headers: [
             'Content-Type': 'application/json',
-            'x-api-key': "${daiApiKey}"
+            'x-api-key': "${state.daiApiKey}"
         ],
         body: JsonOutput.toJson([
-            email: "${email}",
-            integratorToken: "${integratorToken}"
+            email: "${state.email}",
+            integratorToken: "${state.integratorToken}"
         ])
     ]
     
@@ -212,12 +212,6 @@ void handleAuthTokenResponse(response, data) {
     }
 }
 
-    } else {
-        logError "Failed to get auth token: ${response.status}"
-        updateAttr("deviceInitialized", "Auth failed: ${response.status}")
-    }
-}
-
 /**
  * Step 2: Get list of available thermostats
  */
@@ -236,7 +230,7 @@ void getDeviceListAsync(String token) {
         timeout: 30,
         headers: [
             'Accept': 'application/json',
-            'x-api-key': "${daiApiKey}",
+            'x-api-key': "${state.daiApiKey}",
             'Authorization': "Bearer ${token}"
         ]
     ]
@@ -398,11 +392,11 @@ void getDeviceDetailAsync(String deviceId) {
         timeout: 30,
         headers: [
             'Content-Type': 'application/json',
-            'x-api-key': "${daiApiKey}"
+            'x-api-key': "${state.daiApiKey}"
         ],
         body: JsonOutput.toJson([
-            email: "${email}",
-            integratorToken: "${integratorToken}"
+            email: "${state.email}",
+            integratorToken: "${state.integratorToken}"
         ])
     ]
     
@@ -426,7 +420,7 @@ void handleTokenForDeviceDetail(response, data) {
                 timeout: 30,
                 headers: [
                     'Accept': 'application/json',
-                    'x-api-key': "${daiApiKey}",
+                    'x-api-key': "${state.daiApiKey}",
                     'Authorization': "Bearer ${jsonData.accessToken}"
                 ]
             ]
@@ -445,6 +439,7 @@ void handleDeviceDetailResponse(response, data) {
         try {
             def devDetail = response.json
             logDebug "✓ Device details received"
+			logDebug "RAW DEVICE DETAIL: ${groovy.json.JsonOutput.toJson(devDetail)}"      
             
             // Store firmware version
             if (devDetail.firmwareVersion) {
@@ -481,6 +476,7 @@ void updateThermostatAttributes(Map devDetail) {
     def modeStr = ["off","heat","cool","auto","emergency heat"]
     def circStr = ["auto","on","circulate"]
     def fanSpd = ["low","medium","high"]
+	def equipStatusMap = [1:"cooling", 2:"cooling", 3:"heating", 4:"fan only", 5:"idle"]
     
     def degUnit = "°C"
     def detail = devDetail.clone()
@@ -504,6 +500,7 @@ void updateThermostatAttributes(Map devDetail) {
     try {
         updateAttr("thermostatModeNum", detail.mode.toInteger())
         updateAttr("thermostatMode", modeStr[detail.mode.toInteger()])
+ 		updateAttr("thermostatOperatingState", equipStatusMap[detail.equipmentStatus.toInteger()] ?: "idle")
         updateAttr("fan", detail.fan)
         updateAttr("thermostatFanMode", circStr[detail.fanCirculate.toInteger()])
         updateAttr("fanCirculateSpeed", fanSpd[detail.fanCirculateSpeed.toInteger()])
@@ -727,6 +724,14 @@ void setThermostatMode(tmode) {
         emergencyHeat()
 }
 
+void saveCredentials(String apiKey, String email, String token) {
+    // Store in state — state supports arbitrary string length
+    state.daiApiKey = apiKey
+    state.email = email
+    state.integratorToken = token
+    log.info "Credentials saved to state. Run initialize() to connect."
+}
+
 void enableSchedule() {
     logDebug "enableSchedule()"
     if (!state.deviceId) {
@@ -764,11 +769,11 @@ void getAuthTokenAsyncThenSchedulePut(Map bodyMap) {
         timeout: 30,
         headers: [
             'Content-Type': 'application/json',
-            'x-api-key': "${daiApiKey}"
+            'x-api-key': "${state.daiApiKey}"
         ],
         body: JsonOutput.toJson([
-            email: "${email}",
-            integratorToken: "${integratorToken}"
+            email: "${state.email}",
+            integratorToken: "${state.integratorToken}"
         ])
     ]
     
@@ -796,7 +801,7 @@ void handleTokenForSchedulePut(response, data) {
                 timeout: 30,
                 headers: [
                     'Accept': 'application/json',
-                    'x-api-key': "${daiApiKey}",
+                    'x-api-key': "${state.daiApiKey}",
                     'Authorization': "Bearer ${jsonData.accessToken}"
                 ],
                 body: bodyText
@@ -840,11 +845,11 @@ void getAuthTokenAsyncThenPut(String command, Map bodyMap) {
         timeout: 30,
         headers: [
             'Content-Type': 'application/json',
-            'x-api-key': "${daiApiKey}"
+            'x-api-key': "${state.daiApiKey}"
         ],
         body: JsonOutput.toJson([
-            email: "${email}",
-            integratorToken: "${integratorToken}"
+            email: "${state.email}",
+            integratorToken: "${state.integratorToken}"
         ])
     ]
     
@@ -874,7 +879,7 @@ void handleTokenForPut(response, data) {
                 timeout: 30,
                 headers: [
                     'Accept': 'application/json',
-                    'x-api-key': "${daiApiKey}",
+                    'x-api-key': "${state.daiApiKey}",
                     'Authorization': "Bearer ${jsonData.accessToken}"
                 ],
                 body: bodyText
