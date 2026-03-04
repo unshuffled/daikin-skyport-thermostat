@@ -529,6 +529,7 @@ void updateThermostatAttributes(Map devDetail) {
         updateAttr("humidOutdoor", detail.humOutdoor, "%")
         updateAttr("geofencingEnabled", detail.geofencingEnabled ? "true" : "false")
         updateAttr("scheduleEnabled", detail.scheduleEnabled ? "true" : "false")
+        updateAttr("deviceInitialized", "Connected")
     } catch (e) {
         logError "Error updating attributes: $e"
     }
