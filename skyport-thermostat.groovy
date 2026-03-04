@@ -1,12 +1,16 @@
 /* 
  * Daikin SkyPort Thermostat Driver
  *
+ * Uses the documented Daikin One Open API (Integrator Cloud API)
+ * https://www.daikinone.com/openapi/documentation/index.html
+ *
  * Supports:
  * - Daikin One+, One Touch
  * - Amana Smart Thermostat
  * - Goodman GTST? (untested)
  * 
- * https://www.daikinone.com/openapi/documentation/index.html
+ * Dev note: There is also a different (undocumented?) Consumer Skyport API, which a future driver
+ * could choose to implement. Documentation examples:
  * https://github.com/apetrycki/daikinskyport/blob/master/API_info.md
  * https://github.com/TJCoffey/DaikinSkyportToMQTT/blob/main/ThermostatParameters.md
  * 
@@ -54,8 +58,7 @@ metadata {
     definition (
         name: "Daikin SkyPort Thermostat", 
         namespace: "pw.lido", 
-        author: "Jon-Erik Lido",
-        importUrl: ""
+        author: "Jon-Erik Lido"
     ) {
         capability "Actuator"
         capability "Configuration"
@@ -92,12 +95,12 @@ metadata {
         command "setThermostatMode", [[name: "Thermostat mode*",type:"ENUM", description:"Thermostat mode", constraints: operatingModes.collect {k,v -> v}]]
         command "setThermostatFanMode", [[name: "Fan mode*",type:"ENUM", description:"Fan mode", constraints: fanModes.collect {k,v -> v}]]
         command "saveCredentials", [[name:"apiKey", type:"STRING"], [name:"email", type:"STRING"], [name:"integratorToken", type:"STRING"]]
+        command "clearCredentals"
     }   
 }
 
 preferences {
     input("thermostatName", "string", title: "Thermostat Name (from Daikin app)", description: "Select which thermostat this device controls", required: false)
-    input("useFahrenheit", "bool", title: "Use Fahrenheit", defaultValue:false)
     input("pollRate", "number", title: "Thermostat Polling Rate (minutes, 0=disabled)", defaultValue:5)
     input("debugEnabled", "bool", title: "Enable debug logging?")
 }
@@ -110,14 +113,27 @@ def installed() {
 
 def initialize(){
     logDebug "initialize() - Getting device list from Daikin API"
+
+    // Preserve credentials across state reset
+    def savedApiKey       = state.daiApiKey
+    def savedEmail        = state.email
+    def savedToken        = state.integratorToken
+
     state.clear()
-    state.deviceId = null
-    state.availableDevices = [:]
-    
-    // Clear any old stored tokens
+
+    // Restore credentials — the only state that survives initialize()
+    state.daiApiKey       = savedApiKey
+    state.email           = savedEmail
+    state.integratorToken = savedToken
     
     // Start the auth chain
     getAuthTokenAsync()
+}
+
+void clearCredentals() {
+    state.clear()
+    updateAttr("deviceInitialized", "Credentials cleared — run saveCredentials command")
+    logInfo "Credentials cleared. Run saveCredentials to reconfigure."
 }
 
 @SuppressWarnings('unused')
@@ -125,7 +141,8 @@ def updated(){
     logDebug "updated()"
     
     // Always clear any stored tokens
-    
+    device.removeSetting("useFahrenheit")  // TODO: remove after one cycle
+
     if(debugEnabled) {
         runIn(1800,"logsOff")
     } else {
@@ -486,7 +503,7 @@ void updateThermostatAttributes(Map devDetail) {
     logDebug "Stored setpointDelta in Celsius: ${state.setpointDeltaCelsius}"
     
     // Convert to Fahrenheit if needed for display
-    if (useFahrenheit) {
+    if (useFahrenheit()) {
         detail.setpointDelta = celsiusToFahrenheit(detail.setpointDelta.toFloat()).toFloat().round(0)
         detail.setpointMinimum = celsiusToFahrenheit(detail.setpointMinimum.toFloat()).toFloat().round(0)
         detail.heatSetpoint = celsiusToFahrenheit(detail.heatSetpoint.toFloat()).toFloat().round(0)
@@ -548,7 +565,7 @@ void setMode(modeNum) {
     def coolset = device.currentValue("coolingSetpoint")
     def heatset = device.currentValue("heatingSetpoint")
     
-    if (useFahrenheit) {
+    if (useFahrenheit()) {
         coolset = fahrenheitToCelsius(coolset).toFloat().round(1)
         heatset = fahrenheitToCelsius(heatset).toFloat().round(1)
     }
@@ -615,7 +632,7 @@ void setHeatingSetpoint(temp) {
     logDebug "Raw values - heat input: ${temp}, cool: ${coolset}, delta: ${delta}°C, mode: ${mode}, useFahrenheit: ${useFahrenheit}"
     
     // Convert everything to Celsius for calculations
-    if (useFahrenheit) {
+    if (useFahrenheit()) {
         logDebug "Converting from Fahrenheit to Celsius..."
         temp = fahrenheitToCelsius(temp).toFloat().round(1)
         coolset = fahrenheitToCelsius(coolset).toFloat().round(1)
@@ -668,7 +685,7 @@ void setCoolingSetpoint(temp) {
     logDebug "Raw values - cool input: ${temp}, heat: ${heatset}, delta: ${delta}°C, mode: ${mode}, useFahrenheit: ${useFahrenheit}"
     
     // Convert everything to Celsius for calculations
-    if (useFahrenheit) {
+    if (useFahrenheit()) {
         logDebug "Converting from Fahrenheit to Celsius..."
         temp = fahrenheitToCelsius(temp).toFloat().round(1)
         heatset = fahrenheitToCelsius(heatset).toFloat().round(1)
@@ -914,4 +931,8 @@ Float normalizeTemp(temp) {
 @SuppressWarnings('unused')
 void logsOff() {
     device.updateSetting("debugEnabled",[value:"false",type:"bool"])
+}
+
+private boolean useFahrenheit() {
+    return location.temperatureScale == "F"
 }
