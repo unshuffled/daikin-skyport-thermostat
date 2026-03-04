@@ -914,8 +914,8 @@ void handleTokenForPut(response, data) {
 void handlePutResponse(response, data) {
     if (response.status == 200) {
         logDebug "✓ PUT request successful"
-        // Refresh to get updated state
-        runIn(2, 'updateThermostat')
+        // Refresh to get updated state - API says 15 secs to stabilize state
+        runIn(15, 'updateThermostat')
     } else {
         logError "PUT request failed: ${response.status}"
     }
