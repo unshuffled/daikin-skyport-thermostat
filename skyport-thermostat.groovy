@@ -304,15 +304,15 @@ void handleDeviceListResponse(response, data) {
             
             // Now iterate through actual devices
             for (int i = 0; i < devicesList.size(); i++) {
-                def device = devicesList[i]
+                def d = devicesList[i]
                 
-                if (device.id && device.name) {
-                    String deviceId = device.id.toString()
-                    String deviceName = device.name.toString()
+                if (d.id && d.name) {
+                    String deviceId = d.id.toString()
+                    String deviceName = d.name.toString()
                     state.availableDevices[deviceId] = deviceName
                     logDebug "Device ${i+1}: ${deviceName} (${deviceId})"
                 } else {
-                    logError "Device ${i} missing id or name: ${device}"
+                    logError "Device ${i} missing id or name: ${d}"
                 }
             }
             
