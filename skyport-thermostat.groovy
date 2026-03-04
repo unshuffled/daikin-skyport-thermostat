@@ -95,7 +95,7 @@ metadata {
         command "setThermostatMode", [[name: "Thermostat mode*",type:"ENUM", description:"Thermostat mode", constraints: operatingModes.collect {k,v -> v}]]
         command "setThermostatFanMode", [[name: "Fan mode*",type:"ENUM", description:"Fan mode", constraints: fanModes.collect {k,v -> v}]]
         command "saveCredentials", [[name:"apiKey", type:"STRING"], [name:"email", type:"STRING"], [name:"integratorToken", type:"STRING"]]
-        command "clearCredentals"
+        command "clearCredentials"
     }   
 }
 
@@ -130,7 +130,7 @@ def initialize(){
     getAuthTokenAsync()
 }
 
-void clearCredentals() {
+void clearCredentials() {
     state.clear()
     updateAttr("deviceInitialized", "Credentials cleared — run saveCredentials command")
     logInfo "Credentials cleared. Run saveCredentials to reconfigure."
