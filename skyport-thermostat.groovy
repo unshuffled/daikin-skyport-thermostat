@@ -627,7 +627,7 @@ void setHeatingSetpoint(temp) {
     def mode = device.currentValue("thermostatModeNum")
     def delta = state.setpointDeltaCelsius ?: 2.0  // Use stored Celsius delta
     
-    logDebug "Raw values - heat input: ${temp}, cool: ${coolset}, delta: ${delta}°C, mode: ${mode}, useFahrenheit: ${useFahrenheit}"
+    logDebug "Raw values - heat input: ${temp}, cool: ${coolset}, delta: ${delta}°C, mode: ${mode}, useFahrenheit: ${useFahrenheit()}"
     
     // Convert everything to Celsius for calculations
     if (useFahrenheit()) {
@@ -680,7 +680,7 @@ void setCoolingSetpoint(temp) {
     def mode = device.currentValue("thermostatModeNum")
     def delta = state.setpointDeltaCelsius ?: 2.0  // Use stored Celsius delta
     
-    logDebug "Raw values - cool input: ${temp}, heat: ${heatset}, delta: ${delta}°C, mode: ${mode}, useFahrenheit: ${useFahrenheit}"
+    logDebug "Raw values - cool input: ${temp}, heat: ${heatset}, delta: ${delta}°C, mode: ${mode}, useFahrenheit: ${useFahrenheit()}"
     
     // Convert everything to Celsius for calculations
     if (useFahrenheit()) {
