@@ -111,6 +111,12 @@ def installed() {
     initialize()
 }
 
+private boolean credentialsStored() {
+    return state.daiApiKey?.trim() && 
+           state.email?.trim() && 
+           state.integratorToken?.trim()
+}
+
 def initialize(){
     logDebug "initialize() - Getting device list from Daikin API"
 
@@ -125,15 +131,21 @@ def initialize(){
     state.daiApiKey       = savedApiKey
     state.email           = savedEmail
     state.integratorToken = savedToken
-    
-    // Start the auth chain
-    getAuthTokenAsync()
+
+    // don't attempt to authenticate with empty credentials    
+    if (credentialsStored()) {
+        getAuthTokenAsync()
+    } else {
+        updateAttr("deviceInitialized", "Credentials not set — run saveCredentials command")
+        logError "Credentials not configured. Use the saveCredentials command on the device page."
+    }
 }
 
 void clearCredentials() {
     state.clear()
+    unschedule("refresh")
     updateAttr("deviceInitialized", "Credentials cleared — run saveCredentials command")
-    logInfo "Credentials cleared. Run saveCredentials to reconfigure."
+    log.info "Credentials cleared. Run saveCredentials to reconfigure."
 }
 
 @SuppressWarnings('unused')
