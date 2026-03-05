@@ -846,8 +846,8 @@ void handleTokenForSchedulePut(response, data) {
 void handleSchedulePutResponse(response, data) {
     if (response.status == 200) {
         logDebug "✓ Schedule PUT request successful"
-        // Refresh to get updated state
-        runIn(2, 'updateThermostat')
+        // Refresh to get updated state - API says 15 secs to stabilize state
+        runIn(15, 'updateThermostat')
     } else {
         logError "Schedule PUT request failed: ${response.status}"
     }
