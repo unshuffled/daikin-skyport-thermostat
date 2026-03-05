@@ -115,7 +115,7 @@ def installed() {
 private boolean credentialsStored() {
     return state.daiApiKey?.trim() && 
            state.email?.trim() && 
-           state.integratorToken?.trim()
+           device.getDataValue("integratorToken")?.trim()
 }
 
 private boolean isTokenValid() {
@@ -132,6 +132,7 @@ private void cacheToken(tokenJson) {
 }
 
 private Map buildAuthRequest() {
+    String iToken = device.getDataValue("integratorToken")
     return [
         uri:                "${serverPath}/v1/token",
         requestContentType: 'application/json',
@@ -141,7 +142,7 @@ private Map buildAuthRequest() {
                              'x-api-key':    state.daiApiKey],
         body:               JsonOutput.toJson([
                                 email:           state.email,
-                                integratorToken: state.integratorToken
+                                integratorToken: iToken
                             ])
     ]
 }
@@ -738,8 +739,8 @@ void saveCredentials(String apiKey, String email, String token) {
     // Store in state — state supports arbitrary string length
     state.daiApiKey = apiKey
     state.email = email
-    state.integratorToken = token
-    log.info "Credentials saved to state. Run initialize() to connect."
+    device.updateDataValue("integratorToken", token)
+    log.info "Credentials saved. Run initialize() to connect."
 }
 
 void enableSchedule() {
