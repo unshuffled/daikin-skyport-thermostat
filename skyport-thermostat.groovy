@@ -152,10 +152,10 @@ void clearCredentials() {
 def updated(){
     logDebug "updated()"
     
-    if(debugEnabled) {
-        runIn(1800,"logsOff")
+    if (debugEnabled) {
+        runIn(1800,"disableDebugLogging")
     } else {
-        unschedule("logsOff")
+        unschedule("disableDebugLogging")
     }
     
     if(pollRate == null)
@@ -939,7 +939,7 @@ Float normalizeTemp(temp) {
 }
 
 @SuppressWarnings('unused')
-void logsOff() {
+void disableDebugLogging() {
     device.updateSetting("debugEnabled",[value:"false",type:"bool"])
 }
 
