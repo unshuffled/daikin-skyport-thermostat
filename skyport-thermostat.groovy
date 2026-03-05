@@ -226,23 +226,7 @@ void logError(String msg){
  */
 void getAuthTokenAsync() {
     logDebug "Getting auth token"
-    
-    Map requestParams = [
-        uri: "${serverPath}/v1/token",
-        requestContentType: 'application/json',
-        contentType: 'application/json',
-        timeout: 30,
-        headers: [
-            'Content-Type': 'application/json',
-            'x-api-key': "${state.daiApiKey}"
-        ],
-        body: JsonOutput.toJson([
-            email: "${state.email}",
-            integratorToken: "${state.integratorToken}"
-        ])
-    ]
-    
-    asynchttpPost('handleAuthTokenResponse', requestParams)
+    asynchttpPost('handleAuthTokenResponse', buildAuthRequest())
 }
 
 void handleAuthTokenResponse(response, data) {
@@ -431,23 +415,23 @@ void selectThermostatByName() {
  */
 void fetchDeviceDetail(String deviceId) {
     if (isTokenValid()) {
-        performDeviceDetailFetch(state.accessToken, deviceId)
+        getDeviceDetailWithToken(state.accessToken, deviceId)
         return
     }
     logDebug "Token expired — refreshing before device detail"
-    asynchttpPost('handleTokenForDeviceDetail', buildAuthRequest(), [deviceId: deviceId])
+    asynchttpPost('handleAccessTokenAndDeviceDetail', buildAuthRequest(), [deviceId: deviceId])
 }
 
-void handleTokenForDeviceDetail(response, data) {
+void handleAccessTokenAndDeviceDetail(response, data) {
     if (response.status == 200) {
         cacheToken(response.json)
-        performDeviceDetailFetch(state.accessToken, data.deviceId as String)
+        getDeviceDetailWithToken(state.accessToken, data.deviceId as String)
     } else {
         logError "Token refresh failed (device detail): ${response.status}"
     }
 }
 
-private void performDeviceDetailFetch(String token, String deviceId) {
+private void getDeviceDetailWithToken(String token, String deviceId) {
     logDebug "Fetching device detail for ${deviceId}"
     asynchttpGet('handleDeviceDetailResponse', [
         uri:                "${serverPath}/v1/devices/${deviceId}",
@@ -579,7 +563,7 @@ void setMode(modeNum) {
         heatset = fahrenheitToCelsius(heatset).toFloat().round(1)
     }
     
-    sendCommand("/v1/devices/${state.deviceId}/msp", [mode:modeNum, coolSetpoint:coolset, heatSetpoint:heatset])
+    sendModeAndSetpoints([mode:modeNum, coolSetpoint:coolset, heatSetpoint:heatset])
 }
 
 void auto() {
@@ -598,17 +582,17 @@ void emergencyHeat() {
 }
 
 void fanAuto() {
-    sendCommand("/v1/devices/${state.deviceId}/fan", [fanCirculate:0, fanCirculateSpeed:0])
+    sendFanSettings([fanCirculate:0, fanCirculateSpeed:0])
     updateAttr("thermostatFanMode", "auto")
 }
 
 void fanCirculate() {
-    sendCommand("/v1/devices/${state.deviceId}/fan", [fanCirculate:2, fanCirculateSpeed:0])
+    sendFanSettings([fanCirculate:2, fanCirculateSpeed:0])
     updateAttr("thermostatFanMode", "circulate")
 }
 
 void fanOn() {
-    sendCommand("/v1/devices/${state.deviceId}/fan", [fanCirculate:1, fanCirculateSpeed:0])
+    sendFanSettings([fanCirculate:1, fanCirculateSpeed:0])
     updateAttr("thermostatFanMode", "on")
 }
 
@@ -672,7 +656,7 @@ void setHeatingSetpoint(temp) {
     def bodyMap = [mode: mode.toInteger(), coolSetpoint: coolset.toFloat(), heatSetpoint: temp.toFloat()]
     logDebug "Sending PUT with body: ${bodyMap}"
     
-    sendCommand("/v1/devices/${state.deviceId}/msp", bodyMap)
+    sendModeAndSetpoints(bodyMap)
 }
 
 void setCoolingSetpoint(temp) {
@@ -725,7 +709,7 @@ void setCoolingSetpoint(temp) {
     def bodyMap = [mode: mode.toInteger(), coolSetpoint: temp.toFloat(), heatSetpoint: heatset.toFloat()]
     logDebug "Sending PUT with body: ${bodyMap}"
     
-    sendCommand("/v1/devices/${state.deviceId}/msp", bodyMap)
+    sendModeAndSetpoints(bodyMap)
 }
 
 void setThermostatFanMode(fanmode) {
@@ -766,7 +750,7 @@ void enableSchedule() {
     }
     
     logDebug "Enabling schedule for device ${state.deviceId}"
-    sendSchedulePutAsync([scheduleEnabled: true])
+    sendScheduleConfig([scheduleEnabled: true])
 }
 
 void disableSchedule() {
@@ -777,112 +761,53 @@ void disableSchedule() {
     }
     
     logDebug "Disabling schedule for device ${state.deviceId}"
-    sendSchedulePutAsync([scheduleEnabled: false])
-}
-
-void sendSchedulePutAsync(Map bodyMap) {
-    if (isTokenValid()) {
-        performSchedulePut(state.accessToken, bodyMap)
-        return
-    }
-    logDebug "Token expired — refreshing before schedule PUT"
-    asynchttpPost('handleTokenForSchedulePut', buildAuthRequest(), [bodyMap: bodyMap])
-}
-
-void handleTokenForSchedulePut(response, data) {
-    if (response.status == 200) {
-        cacheToken(response.json)
-        performSchedulePut(state.accessToken, data.bodyMap as Map)
-    } else {
-        logError "Token refresh failed (schedule PUT): ${response.status}"
-    }
-}
-
-private void performSchedulePut(String token, Map bodyMap) {
-    logDebug "Schedule PUT — ${bodyMap}"
-    asynchttpPut('handleSchedulePutResponse', [
-        uri:                "${serverPath}/v1/devices/${state.deviceId}/schedule",
-        requestContentType: 'application/json',
-        contentType:        'application/json',
-        timeout:            30,
-        headers:            ['Accept':        'application/json',
-                             'x-api-key':     state.daiApiKey,
-                             'Authorization': "Bearer ${token}"],
-        body:               JsonOutput.toJson(bodyMap)
-    ])
-}
-
-void handleTokenForSchedulePut(response, data) {
-    if (response.status == 200) {
-        try {
-            def jsonData = response.json
-            logDebug "Fresh token obtained for schedule PUT"
-            
-            Map bodyMap = data.bodyMap
-            
-            logDebug "Making schedule PUT with: ${bodyMap}"
-            
-            def bodyText = JsonOutput.toJson(bodyMap)
-            logDebug "JSON body: ${bodyText}"
-            
-            // Use token inline in request
-            Map requestParams = [
-                uri: "${serverPath}/v1/devices/${state.deviceId}/schedule",
-                requestContentType: 'application/json',
-                contentType: 'application/json',
-                timeout: 30,
-                headers: [
-                    'Accept': 'application/json',
-                    'x-api-key': "${state.daiApiKey}",
-                    'Authorization': "Bearer ${jsonData.accessToken}"
-                ],
-                body: bodyText
-            ]
-            
-            asynchttpPut('handleSchedulePutResponse', requestParams)
-        } catch (e) {
-            logError "Error in handleTokenForSchedulePut: ${e.message}"
-        }
-    } else {
-        logError "Failed to get token for schedule PUT: ${response.status}"
-    }
-}
-
-void handleSchedulePutResponse(response, data) {
-    if (response.status == 200) {
-        logDebug "✓ Schedule PUT request successful"
-        // Refresh to get updated state - API says 15 secs to stabilize state
-        runIn(15, 'updateThermostat')
-    } else {
-        logError "Schedule PUT request failed: ${response.status}"
-    }
+    sendScheduleConfig([scheduleEnabled: false])
 }
 
 /***************************
  * End Thermostat Methods **
  **************************/
 
-void sendCommand(String endpoint, Map bodyMap) {
+// Mode + setpoints: PUT /v1/devices/{id}/msp
+void sendModeAndSetpoints(Map bodyMap) {
+    sendCommandInternal("/v1/devices/${state.deviceId}/msp", bodyMap)
+}
+
+// Schedule enable/disable: PUT /v1/devices/{id}/schedule
+void sendScheduleConfig(Map bodyMap) {
+    sendCommandInternal("/v1/devices/${state.deviceId}/schedule", bodyMap)
+}
+
+// Fan circulate (unitary only): PUT /v1/devices/{id}/fan
+void sendFanSettings(Map bodyMap) {
+    sendCommandInternal("/v1/devices/${state.deviceId}/fan", bodyMap)
+}
+
+private void sendCommandInternal(String endpoint, Map bodyMap) {
     if (isTokenValid()) {
-        performPut(state.accessToken, endpoint, bodyMap)
+        putCommand(state.accessToken, endpoint, bodyMap)
         return
     }
     logDebug "Token expired — refreshing before PUT"
-    asynchttpPost('handleTokenForPut', buildAuthRequest(),
+    asynchttpPost('handleAccessTokenAndCommand', buildAuthRequest(),
                   [endpoint: endpoint, bodyMap: bodyMap])
 }
 
-void handleTokenForPut(response, data) {
+void handleAccessTokenAndCommand(response, data) {
     if (response.status == 200) {
         cacheToken(response.json)
-        performPut(state.accessToken, data.endpoint as String, data.bodyMap as Map)
+        putCommand(
+            state.accessToken,
+            data.endpoint as String,
+            data.bodyMap as Map
+        )
     } else {
-        logError "Token refresh failed (PUT): ${response.status}"
+        logError "Token refresh failed (command): ${response.status}"
     }
 }
 
-private void performPut(String token, String endpoint, Map bodyMap) {
-    logDebug "PUT ${endpoint} — ${bodyMap}"
+
+private void putCommand(String token, String endpoint, Map bodyMap) {
     asynchttpPut('handlePutResponse', [
         uri:                "${serverPath}${endpoint}",
         requestContentType: 'application/json',
@@ -893,46 +818,6 @@ private void performPut(String token, String endpoint, Map bodyMap) {
                              'Authorization': "Bearer ${token}"],
         body:               JsonOutput.toJson(bodyMap)
     ])
-}
-
-void handleTokenForPut(response, data) {
-    if (response.status == 200) {
-        try {
-            def jsonData = response.json
-            logDebug "Fresh token obtained for PUT"
-            
-            String command = data.command
-            Map bodyMap = data.bodyMap
-            
-            logDebug "Making PUT to: ${command}"
-            logDebug "Body map: ${bodyMap}"
-            
-            def bodyText = JsonOutput.toJson(bodyMap)
-            logDebug "JSON body: ${bodyText}"
-            
-            // Use token inline in request
-            Map requestParams = [
-                uri: "${serverPath}${command}",
-                requestContentType: 'application/json',
-                contentType: 'application/json',
-                timeout: 30,
-                headers: [
-                    'Accept': 'application/json',
-                    'x-api-key': "${state.daiApiKey}",
-                    'Authorization': "Bearer ${jsonData.accessToken}"
-                ],
-                body: bodyText
-            ]
-            
-            logDebug "Request params: uri=${requestParams.uri}, headers=${requestParams.headers.keySet()}"
-            
-            asynchttpPut('handlePutResponse', requestParams)
-        } catch (e) {
-            logError "Error in handleTokenForPut: ${e.message}"
-        }
-    } else {
-        logError "Failed to get token for PUT: ${response.status}"
-    }
 }
 
 void handlePutResponse(response, data) {
