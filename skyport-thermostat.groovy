@@ -63,6 +63,7 @@ metadata {
         capability "Actuator"
         capability "Configuration"
         capability "Initialize"
+        capability "Refresh"
 
         capability "Thermostat"
         capability "ThermostatCoolingSetpoint"
