@@ -739,16 +739,16 @@ void setThermostatFanMode(fanmode) {
 }
 
 void setThermostatMode(tmode) {
-    if (tmode == "auto")
-        auto()
-    else if (tmode == "heat")
-        heat()
-    else if (tmode == "cool")
-        cool()
-    else if (tmode == "off")
-        off()
-    else
-        emergencyHeat()
+    switch (tmode) {
+        case "auto":           auto();          break
+        case "heat":           heat();          break
+        case "cool":           cool();          break
+        case "off":            off();           break
+        case "emergency heat": emergencyHeat(); break
+        default:
+            logError "setThermostatMode: unrecognized mode '${tmode}' — no action taken"
+            break
+    }
 }
 
 void saveCredentials(String apiKey, String email, String token) {
