@@ -159,16 +159,12 @@ def updated(){
         unschedule("disableDebugLogging")
     }
     
-    if(pollRate == null)
-        device.updateSetting("pollRate",[value:5,type:"number"])
-    if(pollRate > 0){
-        runIn(pollRate*60,"refresh")
-    } else {
-        unschedule("refresh")
-    }
-    
+    unschedule("refresh")
+    if ((pollRate ?: 5) > 0)
+        schedule("0 0/${pollRate ?: 5} * * * ?", "refresh")
+
     // If device is configured, try to use it
-    if(state.deviceId) {
+    if (state.deviceId) {
         updateThermostat()
     }
 }
@@ -554,8 +550,6 @@ void updateThermostatAttributes(Map devDetail) {
 
 void refresh() {
     updateThermostat()
-    if(pollRate > 0)
-        runIn(pollRate*60,"refresh")
 }
 
 void updateThermostat() {
