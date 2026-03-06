@@ -495,7 +495,6 @@ void updateThermostatAttributes(Map devDetail) {
     
     // Store the original Celsius delta for calculations
     state.setpointDeltaCelsius = detail.setpointDelta.toFloat()
-    logDebug "Stored setpointDelta in Celsius: ${state.setpointDeltaCelsius}"
     
     // Convert to Fahrenheit if needed for display
     if (useFahrenheit()) {
