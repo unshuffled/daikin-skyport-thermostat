@@ -837,7 +837,7 @@ Float normalizeTemp(temp) {
 
 @SuppressWarnings('unused')
 void disableDebugLogging() {
-    logDebug "Disabling debug logging at ${now()}"
+    logDebug "Disabling debug logging at ${new Date()}"
     device.updateSetting("debugEnabled",[value:"false",type:"bool"])
 }
 
