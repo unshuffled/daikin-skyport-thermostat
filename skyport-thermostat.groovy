@@ -153,14 +153,12 @@ def initialize(){
     // Preserve credentials across state reset
     def savedApiKey = state.daiApiKey
     def savedEmail  = state.email
-    def savedToken  = state.integratorToken
 
     state.clear()
 
     // Restore credentials — the only state that survives initialize()
     state.daiApiKey       = savedApiKey
     state.email           = savedEmail
-    state.integratorToken = savedToken
 
     // don't attempt to authenticate with empty credentials    
     if (credentialsStored()) {
