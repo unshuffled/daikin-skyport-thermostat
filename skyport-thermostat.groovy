@@ -150,6 +150,8 @@ private Map buildAuthRequest() {
 def initialize(){
     logDebug "initialize() - Getting device list from Daikin API"
 
+    createOutdoorTemperatureSensor()
+
     // Preserve credentials across state reset
     def savedApiKey = state.daiApiKey
     def savedEmail  = state.email
@@ -166,6 +168,19 @@ def initialize(){
     } else {
         updateAttr("deviceInitialized", "Credentials not set — run saveCredentials command")
         logError "Credentials not configured. Use the saveCredentials command on the device page."
+    }
+}
+
+private void createOutdoorTemperatureSensor() {
+    String childDni = "${device.deviceNetworkId}-outdoor"
+    if (!getChildDevice(childDni)) {
+        addChildDevice(
+            "hubitat",
+            "Generic Component Temperature Sensor",
+            childDni,
+            [name: "${device.displayName} Outdoor Temperature", isComponent: true]
+        )
+        logDebug "Created outdoor temperature child device"
     }
 }
 
@@ -525,6 +540,11 @@ void updateThermostatAttributes(Map devDetail) {
         updateAttr("geofencingEnabled", detail.geofencingEnabled ? "true" : "false")
         updateAttr("scheduleEnabled", detail.scheduleEnabled ? "true" : "false")
         updateAttr("deviceInitialized", "Connected")
+
+        def childTemperature = getChildDevice("${device.deviceNetworkId}-outdoor")
+        if (childTemperature) {
+            childTemperature.parse([[name: "temperature", value: detail.tempOutdoor, unit: degUnit]])
+        }
     } catch (e) {
         logError "Error updating attributes: $e"
     }
@@ -535,6 +555,11 @@ void updateThermostatAttributes(Map devDetail) {
  ****************************/ 
 
 void refresh() {
+    updateThermostat()
+}
+
+void componentRefresh(cd) {
+    logDebug "componentRefresh called by child ${cd.displayName}"
     updateThermostat()
 }
 
