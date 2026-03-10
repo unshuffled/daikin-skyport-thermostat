@@ -1,29 +1,32 @@
-/* 
- * Daikin SkyPort Thermostat Driver
- *
- * Uses the documented Daikin One Open API (Integrator Cloud API)
+/*
+ * Daikin Skyport Thermostat Driver
+ * Skyport-based thermostat integration using the Daikin One Open API
+ * (Integrator Cloud API)
  * https://www.daikinone.com/openapi/documentation/index.html
  *
  * Supports:
  * - Daikin One+, One Touch
  * - Amana Smart Thermostat
  * - Goodman GTST? (untested)
- * 
- * Dev note: There is also a different (undocumented?) Consumer Skyport API, which a future driver
- * could choose to implement. Documentation examples:
- * https://github.com/apetrycki/daikinskyport/blob/master/API_info.md
- * https://github.com/TJCoffey/DaikinSkyportToMQTT/blob/main/ThermostatParameters.md
- * 
- *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
- *  in compliance with the License. You may obtain a copy of the License at:
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at:
  *
- *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
- *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
- *  for the specific language governing permissions and limitations under the License.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Forked from: Trevor Deane's Daikin OnePlus Thermostat driver (version 0.2.0)
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *
+ * Change History:
+ *   Date         Who               What
+ *   ----         ---               ----
+ *   2022-07-03   Jean P. May, Jr.  Initial api.daikinskyport.com version
+ *   2024-10      Tom Woodard       SkyPort Integrator API version
+ *   2026-02-13   Trevor Deane      Multi-device support, async HTTP, proper initialization
+ *   2026-03-10   Jon-Erik Lido     Token caching, user entered credentials, bug fixes,
+ *                                    child outdoor temperature device, optimizations
  */
 import java.text.SimpleDateFormat
 import groovy.json.JsonSlurper
