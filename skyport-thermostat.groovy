@@ -61,7 +61,8 @@ metadata {
     definition (
         name: "Daikin SkyPort Thermostat", 
         namespace: "pw.lido", 
-        author: "Jon-Erik Lido"
+        author: "Jon-Erik Lido",
+        importUrl: "https://raw.githubusercontent.com/unshuffled/daikin-skyport-thermostat/refs/heads/main/skyport-thermostat.groovy"
     ) {
         capability "Actuator"
         capability "Configuration"
