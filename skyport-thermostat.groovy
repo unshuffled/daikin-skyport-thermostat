@@ -1,5 +1,5 @@
 /*
- * Daikin Skyport Thermostat Driver
+ * Daikin Skyport Thermostat Driver for Hubitat
  * Skyport-based thermostat integration using the Daikin One Open API
  * (Integrator Cloud API)
  * https://www.daikinone.com/openapi/documentation/index.html
