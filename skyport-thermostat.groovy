@@ -34,7 +34,7 @@ import groovy.json.JsonOutput
 import groovy.transform.Field
 
 @SuppressWarnings('unused')
-static String version() {return "1.0.0"}
+static String version() {return "1.0.1"}
 
 @Field static final serverPath = "https://integrator-api.daikinskyport.com"
 
@@ -69,12 +69,15 @@ metadata {
         capability "Initialize"
         capability "Refresh"
 
+        capability "RelativeHumidityMeasurement"
         capability "Thermostat"
         capability "ThermostatCoolingSetpoint"
         capability "ThermostatFanMode"
         capability "ThermostatHeatingSetpoint"
         capability "ThermostatMode"
         capability "ThermostatOperatingState"
+        capability "ThermostatSetpoint"
+        capability "TemperatureMeasurement"
         
         attribute "equipmentStatus","number"
         attribute "fan","number"
@@ -106,7 +109,7 @@ metadata {
 
 preferences {
     input("thermostatName", "string", title: "Thermostat Name (from Daikin app)", description: "Select which thermostat this device controls", required: false)
-    input("pollRate", "number", title: "Thermostat Polling Rate (minutes, 0=disabled)", defaultValue:5)
+    input("pollRate", "number", title: "Thermostat Polling Rate (minutes, 0=disabled)", defaultValue:10)
     input("debugEnabled", "bool", title: "Enable debug logging?")
 }
 
@@ -544,6 +547,34 @@ void updateThermostatAttributes(Map devDetail) {
         updateAttr("geofencingEnabled", detail.geofencingEnabled ? "true" : "false")
         updateAttr("scheduleEnabled", detail.scheduleEnabled ? "true" : "false")
         updateAttr("deviceInitialized", "Connected")
+
+        // ThermostatSetpoint Capability logic
+        def activeSetpoint
+        switch (detail.mode.toInteger()) {
+            case 1: // heat
+            case 4: // emergency heat
+                activeSetpoint = detail.heatSetpoint
+                break
+            case 2: // cool
+                activeSetpoint = detail.coolSetpoint
+                break
+            case 3: // auto
+                switch (detail.equipmentStatus.toInteger()) {
+                    case 1: // cooling
+                    case 2: // overcooling for dehumidification
+                        activeSetpoint = detail.coolSetpoint
+                        break
+                    case 3: // heating
+                        activeSetpoint = detail.heatSetpoint
+                        break
+                    default: // idle, fan only, or invalid state
+                        activeSetpoint = device.currentValue("thermostatSetpoint")
+                }
+                break
+            default: // off or invalid mode
+                activeSetpoint = device.currentValue("thermostatSetpoint")
+        }
+        updateAttr("thermostatSetpoint", activeSetpoint, degUnit)
 
         def childTemperature = getChildDevice("${device.deviceNetworkId}-outdoor")
         if (childTemperature) {
