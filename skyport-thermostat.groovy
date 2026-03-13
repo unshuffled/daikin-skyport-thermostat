@@ -34,7 +34,7 @@ import groovy.json.JsonOutput
 import groovy.transform.Field
 
 @SuppressWarnings('unused')
-static String version() {return "1.0.1"}
+static String version() {return "1.0.2"}
 
 @Field static final serverPath = "https://integrator-api.daikinskyport.com"
 
@@ -109,7 +109,7 @@ metadata {
 
 preferences {
     input("thermostatName", "string", title: "Thermostat Name (from Daikin app)", description: "Select which thermostat this device controls", required: false)
-    input("pollRate", "number", title: "Thermostat Polling Rate (minutes, 0=disabled)", defaultValue:10)
+    input("pollRate", "number", title: "Thermostat Polling Rate (minutes, 0=disabled)", defaultValue: 10)
     input("debugEnabled", "bool", title: "Enable debug logging?")
 }
 
@@ -120,9 +120,23 @@ def installed() {
 }
 
 private boolean credentialsStored() {
-    return state.daiApiKey?.trim() && 
-           state.email?.trim() && 
-           device.getDataValue("integratorToken")?.trim()
+    migrateLegacyStateIfNeeded() // TODO remove in a couple of revisions
+    return !!(state.daiApiKey && state.email && state.integratorToken)
+}
+
+// TODO remove this method in a couple of revisions
+private void migrateLegacyStateIfNeeded() {
+    state.daiApiKey = state.daiApiKey?.trim()
+    state.email = state.email?.trim()
+
+    if (!state.integratorToken) {
+        def legacyToken = device.getDataValue("integratorToken")?.trim()
+        if (legacyToken) {
+            state.integratorToken = legacyToken
+            device.removeDataValue("integratorToken")
+            logDebug "Migrated legacy integratorToken from device data to state"
+        }
+    }
 }
 
 private boolean isTokenValid() {
@@ -139,7 +153,7 @@ private void cacheToken(tokenJson) {
 }
 
 private Map buildAuthRequest() {
-    String iToken = device.getDataValue("integratorToken")
+    migrateLegacyStateIfNeeded() // TODO remove in a couple of revisions- used for data value migration into state
     return [
         uri:                "${serverPath}/v1/token",
         requestContentType: 'application/json',
@@ -149,25 +163,30 @@ private Map buildAuthRequest() {
                              'x-api-key':    state.daiApiKey],
         body:               JsonOutput.toJson([
                                 email:           state.email,
-                                integratorToken: iToken
+                                integratorToken: state.integratorToken
                             ])
     ]
 }
 
 def initialize(){
     logDebug "initialize() - Getting device list from Daikin API"
+    
+    unschedule("refresh")
 
     createOutdoorTemperatureSensor()
 
     // Preserve credentials across state reset
     def savedApiKey = state.daiApiKey
     def savedEmail  = state.email
+ 	def savedToken  = state.integratorToken
 
     state.clear()
+    device.removeDataValue("supportedThermostatModes")
 
     // Restore credentials — the only state that survives initialize()
     state.daiApiKey       = savedApiKey
     state.email           = savedEmail
+    state.integratorToken = savedToken
 
     // don't attempt to authenticate with empty credentials    
     if (credentialsStored()) {
@@ -198,6 +217,13 @@ void clearCredentials() {
     log.info "Credentials cleared. Run saveCredentials to reconfigure."
 }
 
+private void establishRefreshSchedule() {
+    unschedule("refresh")
+    if ((pollRate ?: 5) > 0) {
+        schedule("0 0/${pollRate ?: 5} * * * ?", "refresh")
+    }
+}
+
 @SuppressWarnings('unused')
 def updated(){
     logDebug "updated()"
@@ -208,13 +234,13 @@ def updated(){
         unschedule("disableDebugLogging")
     }
     
-    unschedule("refresh")
-    if ((pollRate ?: 5) > 0)
-        schedule("0 0/${pollRate ?: 5} * * * ?", "refresh")
-
-    // If device is configured, try to use it
-    if (state.deviceId) {
+    // If device is configured, schedule regular refreshs
+    if (state.deviceId && credentialsStored()) {
+        establishRefreshSchedule()
         updateThermostat()
+    } else {
+        unschedule("refresh")
+        logDebug "Incomplete credentials - use Save Credentials begin thermostat connection"
     }
 }
 
@@ -403,9 +429,6 @@ void selectThermostatByName() {
             state.deviceId = foundId
             logDebug "✓ Selected thermostat: ${foundName} (${foundId})"
             updateAttr("deviceInitialized", "Connecting...")
-            // Step 4: Get thermostat details
-            fetchDeviceDetail(state.deviceId)
-            return
         } else {
             logError "Thermostat '${thermostatName}' not found"
             logError "Available thermostats: ${state.availableDevices.values().join(', ')}"
@@ -421,14 +444,18 @@ void selectThermostatByName() {
             logDebug "✓ Using first thermostat: ${firstName} (${state.deviceId})"
             logDebug "To use a different thermostat, set 'Thermostat Name' in preferences"
             updateAttr("deviceInitialized", "Connecting...")
-            
-            // Step 4: Get thermostat details
-            fetchDeviceDetail(state.deviceId)
         } else {
             logError "No devices available"
             updateAttr("deviceInitialized", "No devices available")
+            return
         }
     }
+
+    // retrieve the thermostat details
+    fetchDeviceDetail(state.deviceId)
+
+    // safe to schedule refreshes now
+    establishRefreshSchedule()
 }
 
 /**
@@ -575,6 +602,19 @@ void updateThermostatAttributes(Map devDetail) {
                 activeSetpoint = device.currentValue("thermostatSetpoint")
         }
         updateAttr("thermostatSetpoint", activeSetpoint, degUnit)
+
+        // Regenerate supportedThermostatModes when not set
+        def supportedThermoModes = getDataValue("supportedThermostatModes")
+        if (supportedThermoModes == null) {
+            logDebug "Updating supportedThermostatModes"
+            def List<String> thermoModes = ["off", "heat", "cool", "auto"]
+            if (detail.modeEmHeatAvailable.toBoolean()) {
+                thermoModes.add("emergency heat")
+            }
+            supportedThermoModes = JsonOutput.toJson(thermoModes)
+            device.updateDataValue("supportedThermostatModes", supportedThermoModes)
+            updateAttr("supportedThermostatModes", supportedThermoModes)
+        }
 
         def childTemperature = getChildDevice("${device.deviceNetworkId}-outdoor")
         if (childTemperature) {
@@ -794,10 +834,18 @@ void setThermostatMode(tmode) {
 
 void saveCredentials(String apiKey, String email, String token) {
     // Store in state — state supports arbitrary string length
-    state.daiApiKey = apiKey
-    state.email = email
-    device.updateDataValue("integratorToken", token)
-    log.info "Credentials saved. Run initialize() to connect."
+    state.daiApiKey = apiKey?.trim()
+    state.email = email?.trim()
+    state.integratorToken = token?.trim()
+
+    unschedule("refresh")
+
+    if (credentialsStored()) {
+        initialize()
+    } else {
+        log.warn "Required credentials missing- could not initialize thermostat driver"
+        updateAttr("deviceInitialized", "Credentials not set — run saveCredentials command")
+    }
 }
 
 void enableSchedule() {
