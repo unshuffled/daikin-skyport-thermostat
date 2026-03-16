@@ -39,7 +39,7 @@ See Daikin’s API documentation and terms for how to obtain these credentials a
 2. **Add the driver code**
 
    - In Hubitat, go to **Drivers Code → New Driver**.
-   - Paste the contents of `Daikin_SkyPort_Thermostat.groovy`.
+   - Paste the contents of `skyport-thermostat.groovy`.
    - Click **Save**.
 
 3. **Create a device**
@@ -76,6 +76,28 @@ See Daikin’s API documentation and terms for how to obtain these credentials a
      - **Thermostat Polling Rate** – in minutes (0 to disable polling).
      - **Enable debug logging** – optional, useful while testing (resets after 30 minutes)
    - Click **Save Preferences**
+
+## Updating the Driver
+
+For your convenience the driver includes an update URL to allow easy updates from the github repository.
+
+1. Select the driver by name from the Hubitat "Drivers code" screen.
+
+2. Click to open the "three dots" menu in the top right of the page.
+
+3. Select "Import"
+
+4. The import URL will automatically populate. Click the "Import" button and agree to overrided the old code.
+
+5. Click the green "Save" button to apply the changes.
+
+## Limitations and Caveats
+
+- **Single thermostat per device**: This driver currently selects one thermostat from your Daikin account. If you have multiple thermostats, you may need one hub device instance per thermostat, each configured with an appropriate Thermostat Name.
+- **Cloud dependency**: All communication goes through the Daikin cloud API. If Daikin’s service is down, slow, or your integrator access is revoked, the driver will not be able to control or read the thermostat.
+- **API changes**: Daikin may change the Open API at any time. This driver targets the documented Integrator API as of its development date; future changes on Daikin’s side may require driver updates.
+- **Scheduling behavior**: The driver exposes simple `enableSchedule()` / `disableSchedule()` commands that toggle the thermostat’s built-in schedule via the `/schedule` endpoint. It does not manage or edit the schedule contents.
+- **Fan circulation**: Fan circulation settings supported for unitary systems only. This is a hardware limitation- mini split or VRV systems will ignore all fan settings. Enable the "Supports scheduled fan circulation" setting in the driver to indicate that you have a unitary system supporting fan setting changes.
 
 ## Developer Docs
 
@@ -114,13 +136,6 @@ This child device is updated each time the thermostat detail is refreshed, and c
 - Your own custom apps
 
 Refreshing the child device calls `componentRefresh` on the parent, which in turn triggers a full thermostat refresh.
-
-## Limitations and Caveats
-
-- **Single thermostat per device**: This driver currently selects one thermostat from your Daikin account. If you have multiple thermostats, you may need one hub device instance per thermostat, each configured with an appropriate Thermostat Name.
-- **Cloud dependency**: All communication goes through the Daikin cloud API. If Daikin’s service is down, slow, or your integrator access is revoked, the driver will not be able to control or read the thermostat.
-- **API changes**: Daikin may change the Open API at any time. This driver targets the documented Integrator API as of its development date; future changes on Daikin’s side may require driver updates.
-- **Scheduling behavior**: The driver exposes simple `enableSchedule()` / `disableSchedule()` commands that toggle the thermostat’s built-in schedule via the `/schedule` endpoint. It does not manage or edit the schedule contents.
 
 ## Logging and Debugging
 

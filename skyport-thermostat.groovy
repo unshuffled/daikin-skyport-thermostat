@@ -7,7 +7,7 @@
  * Supports:
  * - Daikin One+, One Touch
  * - Amana Smart Thermostat
- * - Goodman GTST (untested)
+ * - Goodman GTST
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,27 +34,48 @@ import groovy.json.JsonOutput
 import groovy.transform.Field
 
 @SuppressWarnings('unused')
-static String version() {return "1.0.2"}
+static String version() {return "1.0.4"}
 
 @Field static final serverPath = "https://integrator-api.daikinskyport.com"
 
-@Field static Map operatingModes = [
-"0":"off",
-"1":"heat",
-"2":"cool",
-"3":"auto",
-"4":"emergency heat"
+@Field static final Map<Integer, String> OPERATING_MODES = [
+    0: "off",
+    1: "heat",
+    2: "cool",
+    3: "auto",
+    4: "emergency heat"
 ]
 
-@Field static Map fanModes = [
-"0":"auto",
-"1":"on"
+@Field static final Map<Integer, String> OPERATING_STATES = [
+    1: "cooling",
+    2: "cooling",
+    3: "heating",
+    4: "fan only",
+    5: "idle"
 ]
 
-@Field static Map fanCirculateModes = [
-"0":"off",
-"1":"always on",
-"2":"on a schedule"
+@Field static final Map<Integer, String> FAN_CIRCULATE_SPEED_NAMES = [
+    0: "low",
+    1: "medium",
+    2: "high"
+]
+
+@Field static final Map<String, Integer> FAN_CIRCULATE_SPEEDS = [
+    "low": 0,
+    "medium": 1,
+    "high": 2
+]
+
+@Field static final Map<Integer, String> DAIKIN_TO_HUBITAT_FAN_MODES = [
+    0: "auto",
+    1: "on",
+    2: "circulate"
+]
+
+@Field static final Map<String, Integer> HUBITAT_TO_DAIKIN_FAN_MODES = [
+    "auto": 0,
+    "on": 1,
+    "circulate": 2
 ]
 
 metadata {
@@ -100,8 +121,9 @@ metadata {
         command "refresh"
         command "enableSchedule"
         command "disableSchedule"
-        command "setThermostatMode", [[name: "Thermostat mode*",type:"ENUM", description:"Thermostat mode", constraints: operatingModes.collect {k,v -> v}]]
-        command "setThermostatFanMode", [[name: "Fan mode*",type:"ENUM", description:"Fan mode", constraints: fanModes.collect {k,v -> v}]]
+        command "setThermostatMode", [[name: "Thermostat mode*", type:"ENUM", description:"Thermostat mode", constraints: OPERATING_MODES.values() as List]]
+        command "setThermostatFanMode", [[name: "Fan mode*", type:"ENUM", description:"Fan mode", constraints: DAIKIN_TO_HUBITAT_FAN_MODES.values() as List]]
+        command "setFanCirculateSpeed", [[name: "Circulate speed", type:"ENUM", description:"Fan circulation speed", constraints: FAN_CIRCULATE_SPEEDS.keySet() as List]]
         command "saveCredentials", [[name:"apiKey", type:"STRING"], [name:"email", type:"STRING"], [name:"integratorToken", type:"STRING"]]
         command "clearCredentials"
     }   
@@ -109,8 +131,13 @@ metadata {
 
 preferences {
     input("thermostatName", "string", title: "Thermostat Name (from Daikin app)", description: "Select which thermostat this device controls", required: false)
-    input("pollRate", "number", title: "Thermostat Polling Rate (minutes, 0=disabled)", defaultValue: 10)
+    input("pollRate", "number", title: "Thermostat Polling Rate (minutes)", description: "Minimum value 5. Use 0 to disable polling.", defaultValue: 10)
     input("debugEnabled", "bool", title: "Enable debug logging?")
+    input(name: "supportsFanCirculate",
+      type: "bool",
+      title: "Supports scheduled fan circulation",
+      description: "Enable only if your thermostat has a 'Circulate Air' option, such as 'Always On' or 'On a Schedule'. Leave disabled for systems that only support basic fan auto/on operation.",
+      defaultValue: false)
 }
 
 @SuppressWarnings('unused')
@@ -219,11 +246,21 @@ void clearCredentials() {
 
 private void establishRefreshSchedule() {
     unschedule("refresh")
-    if ((pollRate ?: 5) > 0) {
-        schedule("0 0/${pollRate ?: 5} * * * ?", "refresh")
+
+    def rate = pollRate
+    if (rate == null || rate == 0) {
+        return // polling is disabled
+    } else {
+        rate = Math.max(rate, 5) // minimum rate of 5
+        if (rate != pollRate) {
+            setSetting("pollRate", rate) // update the preference
+        }
     }
+
+    schedule("0 0/${rate} * * * ?", "refresh")
 }
 
+/* Handles changes to Preferences */
 @SuppressWarnings('unused')
 def updated(){
     logDebug "updated()"
@@ -234,6 +271,8 @@ def updated(){
         unschedule("disableDebugLogging")
     }
     
+    applySupportedThermostatFanModes()
+
     // If device is configured, schedule regular refreshs
     if (state.deviceId && credentialsStored()) {
         establishRefreshSchedule()
@@ -401,8 +440,7 @@ void handleDeviceListResponse(response, data) {
 }
 
 void selectThermostatByName() {
-    logDebug "Step 3: Selecting thermostat"
-    logDebug "Available devices map: ${state.availableDevices}"
+    logDebug "Selecting thermostat. Available devices: ${state.availableDevices}"
     
     if (!state.availableDevices || state.availableDevices.size() == 0) {
         logError "No devices available to select"
@@ -532,11 +570,6 @@ void retryDeviceDetail() {
 void updateThermostatAttributes(Map devDetail) {
     logDebug "Updating thermostat attributes"
     
-    def modeStr = ["off","heat","cool","auto","emergency heat"]
-    def circStr = ["auto","on","circulate"]
-    def fanSpd = ["low","medium","high"]
-	def equipStatusMap = [1:"cooling", 2:"cooling", 3:"heating", 4:"fan only", 5:"idle"]
-    
     def degUnit = "°C"
     def detail = devDetail.clone()
     
@@ -557,11 +590,11 @@ void updateThermostatAttributes(Map devDetail) {
     
     try {
         updateAttr("thermostatModeNum", detail.mode.toInteger())
-        updateAttr("thermostatMode", modeStr[detail.mode.toInteger()])
- 		updateAttr("thermostatOperatingState", equipStatusMap[detail.equipmentStatus.toInteger()] ?: "idle")
+        updateAttr("thermostatMode", OPERATING_MODES[detail.mode.toInteger()])
+ 		updateAttr("thermostatOperatingState", OPERATING_STATES[detail.equipmentStatus.toInteger()] ?: "idle")
         updateAttr("fan", detail.fan)
-        updateAttr("thermostatFanMode", circStr[detail.fanCirculate.toInteger()])
-        updateAttr("fanCirculateSpeed", fanSpd[detail.fanCirculateSpeed.toInteger()])
+        updateAttr("thermostatFanMode", DAIKIN_TO_HUBITAT_FAN_MODES[detail.fanCirculate.toInteger()])
+        updateAttr("fanCirculateSpeed", FAN_CIRCULATE_SPEED_NAMES[detail.fanCirculateSpeed.toInteger()])
         updateAttr("setpointDelta", detail.setpointDelta, degUnit)
         updateAttr("setpointMinimum", detail.setpointMinimum, degUnit)
         updateAttr("heatingSetpoint", detail.heatSetpoint, degUnit)
@@ -604,7 +637,7 @@ void updateThermostatAttributes(Map devDetail) {
         updateAttr("thermostatSetpoint", activeSetpoint, degUnit)
 
         // Regenerate supportedThermostatModes when not set
-        def supportedThermoModes = getDataValue("supportedThermostatModes")
+        def supportedThermoModes = device.currentValue("supportedThermostatModes")
         if (supportedThermoModes == null) {
             logDebug "Updating supportedThermostatModes"
             def List<String> thermoModes = ["off", "heat", "cool", "auto"]
@@ -612,8 +645,14 @@ void updateThermostatAttributes(Map devDetail) {
                 thermoModes.add("emergency heat")
             }
             supportedThermoModes = JsonOutput.toJson(thermoModes)
-            device.updateDataValue("supportedThermostatModes", supportedThermoModes)
             updateAttr("supportedThermostatModes", supportedThermoModes)
+        }
+
+        // Regenerate supportedThermostatFanModes when not set
+        def supportedFanModes = device.currentValue("supportedThermostatFanModes")
+        if (supportedFanModes == null) {
+            logDebug "Updating supportedThermostatFanModes"
+            applySupportedThermostatFanModes()
         }
 
         def childTemperature = getChildDevice("${device.deviceNetworkId}-outdoor")
@@ -623,6 +662,12 @@ void updateThermostatAttributes(Map devDetail) {
     } catch (e) {
         logError "Error updating attributes: $e"
     }
+}
+
+private void applySupportedThermostatFanModes() {
+    boolean circulateEnabled = settings?.supportsFanCirculate == true
+    List<String> modes = circulateEnabled ? ["on", "circulate", "auto"] : []
+    updateAttr("supportedThermostatFanModes", JsonOutput.toJson(modes))
 }
 
 /*****************************
@@ -646,62 +691,119 @@ void updateThermostat() {
     fetchDeviceDetail(state.deviceId)
 }
 
-void setMode(modeNum) {
+boolean setMode(modeNum) {
     logDebug "setMode($modeNum)"
     if (!state.deviceId) {
         logError "setMode: Device not configured"
-        return
+        return false
     }
-    
+
     def coolset = device.currentValue("coolingSetpoint")
     def heatset = device.currentValue("heatingSetpoint")
-    
+
     if (useFahrenheit()) {
         coolset = fahrenheitToCelsius(coolset).toFloat().round(1)
         heatset = fahrenheitToCelsius(heatset).toFloat().round(1)
     }
-    
-    sendModeAndSetpoints([mode:modeNum, coolSetpoint:coolset, heatSetpoint:heatset])
+
+    try {
+        sendModeAndSetpoints([mode:modeNum, coolSetpoint:coolset, heatSetpoint:heatset])
+        return true
+    } catch (e) {
+        logError "Failed to send mode and setpoints: $e"
+        return false
+    }
 }
 
 void auto() {
-    setMode(3)
-    updateAttr("thermostatMode", "auto")
+    if (!state.deviceId) {
+        logError "auto(): Device not configured — cannot set mode"
+        return
+    }
+
+    if (setMode(3)) {
+        updateAttr("thermostatMode", "auto")
+    }
 }
 
 void cool() {
-    setMode(2)
-    updateAttr("thermostatMode", "cool")
+    if (!state.deviceId) {
+        logError "cool(): Device not configured — cannot set mode"
+        return
+    }
+
+    if (setMode(2)) {
+        updateAttr("thermostatMode", "cool")
+    }
 }
 
 void emergencyHeat() {
-    setMode(4)
-    updateAttr("thermostatMode", "emergency heat")
-}
+    if (!state.deviceId) {
+        logError "emergencyHeat(): Device not configured — cannot set mode"
+        return
+    }
 
-void fanAuto() {
-    sendFanSettings([fanCirculate:0, fanCirculateSpeed:0])
-    updateAttr("thermostatFanMode", "auto")
-}
-
-void fanCirculate() {
-    sendFanSettings([fanCirculate:2, fanCirculateSpeed:0])
-    updateAttr("thermostatFanMode", "circulate")
-}
-
-void fanOn() {
-    sendFanSettings([fanCirculate:1, fanCirculateSpeed:0])
-    updateAttr("thermostatFanMode", "on")
+    if (setMode(4)) {
+        updateAttr("thermostatMode", "emergency heat")
+    }
 }
 
 void heat() {
-    setMode(1)
-    updateAttr("thermostatMode", "heat")
+    if (!state.deviceId) {
+        logError "heat(): Device not configured — cannot set mode"
+        return
+    }
+
+    if (setMode(1)) {
+        updateAttr("thermostatMode", "heat")
+    }
 }
 
 void off() {
-    setMode(0)
-    updateAttr("thermostatMode", "off")
+    if (!state.deviceId) {
+        logError "heat(): Device not configured — cannot set mode"
+        return
+    }
+
+    if (setMode(0)) {
+        updateAttr("thermostatMode", "off")
+    }
+}
+
+void fanAuto() {
+    if (settings?.supportsFanCirculate == true) {
+        sendFanSettings([fanCirculate:0, fanCirculateSpeed:currentCirculateSpeedCode()])
+        updateAttr("thermostatFanMode", "auto")
+    } else {
+        log.warn "supportsFanCirculate preference disabled- ignoring attempt set fan circulation to auto"
+    }
+}
+
+void fanCirculate() {
+    if (settings?.supportsFanCirculate == true) {
+        sendFanSettings([fanCirculate:2, fanCirculateSpeed:currentCirculateSpeedCode()])
+        updateAttr("thermostatFanMode", "circulate")
+    } else {
+        log.warn "supportsFanCirculate preference disabled- ignoring attempt set fan circulation to circulate"
+    }
+}
+
+void fanOn() {
+    if (settings?.supportsFanCirculate == true) {
+        sendFanSettings([fanCirculate:1, fanCirculateSpeed:currentCirculateSpeedCode()])
+        updateAttr("thermostatFanMode", "on")
+    } else {
+        log.warn "supportsFanCirculate preference disabled- ignoring attempt set fan circulation to on"
+    }
+}
+
+private int currentCirculateSpeedCode() {
+    String speedText = device.currentValue("fanCirculateSpeed")
+    if (speedText) {
+        return FAN_CIRCULATE_SPEEDS[speedText]
+    } else { // safe default if/while uninitialized
+        return FAN_CIRCULATE_SPEEDS["low"]
+    }
 }
 
 void setHeatingSetpoint(temp) {
@@ -811,12 +913,14 @@ void setCoolingSetpoint(temp) {
 }
 
 void setThermostatFanMode(fanmode) {
-    if (fanmode == "on") 
-       fanOn()
-    else if (fanmode == "circulate")
-       fanCirculate()
-    else
-       fanAuto()    
+    switch (fanmode) {
+        case "on":        fanOn();        break
+        case "circulate": fanCirculate(); break
+        case "auto":      fanAuto();      break
+        default:
+            logError "setThermostatFanMode: unrecognized mode '${fanmode}' — no action taken"
+            break
+    }
 }
 
 void setThermostatMode(tmode) {
@@ -830,6 +934,26 @@ void setThermostatMode(tmode) {
             logError "setThermostatMode: unrecognized mode '${tmode}' — no action taken"
             break
     }
+}
+
+void setFanCirculateSpeed(String speed) {
+    if (!speed) {
+        log.warn "setFanCirculateSpeed denied: Uninitialized or invalid circulate speed ${speed}"
+        return
+    }
+    Integer speedCode = FAN_CIRCULATE_SPEEDS[speed]
+
+    String currentFanMode = device.currentValue("thermostatFanMode")
+    if (!currentFanMode) {
+        log.warn "setFanCirculateSpeed denied: Uninitialized or invalid circulation mode ${currentFanMode}"
+        return
+    }
+    logDebug "setFanCirculateSpeed: using fan mode ${currentFanMode}"
+
+    // update the fan circulation speed, but retain the current the circulation mode setting
+    updateAttr("fanCirculateSpeed", speed) 
+    Integer circCode = HUBITAT_TO_DAIKIN_FAN_MODES[device.currentValue("thermostatFanMode")]
+    sendFanSettings([fanCirculate: circCode, fanCirculateSpeed: speedCode])
 }
 
 void saveCredentials(String apiKey, String email, String token) {
@@ -885,14 +1009,18 @@ void sendScheduleConfig(Map bodyMap) {
 }
 
 // Fan circulate (unitary only): PUT /v1/devices/{id}/fan
-void sendFanSettings(Map bodyMap) {
-    sendCommandInternal("/v1/devices/${state.deviceId}/fan", bodyMap)
+boolean sendFanSettings(Map bodyMap) {
+    if (!(settings?.supportsFanCirculate == true)) {
+        log.warn "Fan circulation not supported/enabled. Ignoring attempt to update fan settings."
+        return false
+    }
+    return sendCommandInternal("/v1/devices/${state.deviceId}/fan", bodyMap)
 }
 
-private void sendCommandInternal(String endpoint, Map bodyMap) {
+private boolean sendCommandInternal(String endpoint, Map bodyMap) {
     if (isTokenValid()) {
         putCommand(state.accessToken, endpoint, bodyMap)
-        return
+        return false
     }
     logDebug "Token expired — refreshing before PUT"
     asynchttpPost('handleAccessTokenAndCommand', buildAuthRequest(),
@@ -914,7 +1042,7 @@ void handleAccessTokenAndCommand(response, data) {
 
 
 private void putCommand(String token, String endpoint, Map bodyMap) {
-    asynchttpPut('handlePutResponse', [
+    Map putMap = [
         uri:                "${serverPath}${endpoint}",
         requestContentType: 'application/json',
         contentType:        'application/json',
@@ -923,7 +1051,9 @@ private void putCommand(String token, String endpoint, Map bodyMap) {
                              'x-api-key':     state.daiApiKey,
                              'Authorization': "Bearer ${token}"],
         body:               JsonOutput.toJson(bodyMap)
-    ])
+    ]
+    // logDebug "putCommand sending: ${putMap}"
+    asynchttpPut('handlePutResponse', putMap)
 }
 
 void handlePutResponse(response, data) {
