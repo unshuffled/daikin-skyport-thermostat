@@ -27,6 +27,8 @@
  *   2026-02-13   Trevor Deane      Multi-device support, async HTTP, proper initialization
  *   2026-03-10   Jon-Erik Lido     Token caching, user entered credentials, bug fixes,
  *                                    child outdoor temperature device, optimizations
+ *        1.0.1 - 1.0.4             thermostatSetpoint, bug fixes, fan settings
+ *                1.0.5             outdoor temperature and humidity child device
  */
 import java.text.SimpleDateFormat
 import groovy.json.JsonSlurper
@@ -34,7 +36,7 @@ import groovy.json.JsonOutput
 import groovy.transform.Field
 
 @SuppressWarnings('unused')
-static String version() {return "1.0.4"}
+static String version() {return "1.0.5"}
 
 @Field static final serverPath = "https://integrator-api.daikinskyport.com"
 
@@ -200,7 +202,7 @@ def initialize(){
     
     unschedule("refresh")
 
-    createOutdoorTemperatureSensor()
+    createOutdoorSensor()
 
     // Preserve credentials across state reset
     def savedApiKey = state.daiApiKey
@@ -224,16 +226,27 @@ def initialize(){
     }
 }
 
-private void createOutdoorTemperatureSensor() {
+private void createOutdoorSensor() {
     String childDni = "${device.deviceNetworkId}-outdoor"
-    if (!getChildDevice(childDni)) {
+    final String sensorType = "Generic Component Temperature Humidity Sensor"
+    def child = getChildDevice(childDni)
+    if (child) {
+        String currentType = child.getDataValue("deviceType")
+        if (currentType != sensorType) {
+            deleteChildDevice(childDni)
+            child = null
+            logDebug "Recreating child sensor as ${sensorType}"
+        }
+    }
+
+    if (!child) {
         addChildDevice(
             "hubitat",
-            "Generic Component Temperature Sensor",
+            sensorType,
             childDni,
-            [name: "${device.displayName} Outdoor Temperature", isComponent: true]
+            [name: "${device.displayName} Outdoor Conditions", isComponent: true]
         )
-        logDebug "Created outdoor temperature child device"
+        logDebug "Created outdoor sensor child device"
     }
 }
 
@@ -655,9 +668,10 @@ void updateThermostatAttributes(Map devDetail) {
             applySupportedThermostatFanModes()
         }
 
-        def childTemperature = getChildDevice("${device.deviceNetworkId}-outdoor")
-        if (childTemperature) {
-            childTemperature.parse([[name: "temperature", value: detail.tempOutdoor, unit: degUnit]])
+        def childConditions = getChildDevice("${device.deviceNetworkId}-outdoor")
+        if (childConditions) {
+            childConditions.parse([[name: "temperature", value: detail.tempOutdoor, unit: degUnit]])
+            childConditions.parse([[name: "humidity", value: detail.humOutdoor, unit: "%"]])
         }
     } catch (e) {
         logError "Error updating attributes: $e"
